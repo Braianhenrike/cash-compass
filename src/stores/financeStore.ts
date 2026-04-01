@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Bill, BrickItem, BrickCost, Category, Income, Settings, ScenarioType } from '@/types/finance';
-import { v4 as uuidv4 } from 'crypto';
 
 const genId = () => crypto.randomUUID();
 
