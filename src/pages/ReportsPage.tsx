@@ -1,168 +1,281 @@
-import { useMemo } from 'react';
-import { useFinanceStore } from '@/stores/financeStore';
-import { formatCurrency, calcBrickMetrics, calcLockedCapital } from '@/lib/calculations';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import { useMemo, useState } from "react";
+import { Bar, BarChart, Cell, ComposedChart, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-const COLORS = ['hsl(142, 70%, 45%)', 'hsl(217, 70%, 50%)', 'hsl(38, 92%, 50%)', 'hsl(0, 72%, 51%)', 'hsl(280, 60%, 50%)'];
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { buildReportSnapshot, formatCurrency } from "@/lib/calculations";
+import { useFinanceStore } from "@/stores/financeStore";
+import type { ScenarioType } from "@/types/finance";
+
+const COLORS = [
+  "hsl(142, 70%, 45%)",
+  "hsl(217, 70%, 50%)",
+  "hsl(38, 92%, 50%)",
+  "hsl(0, 72%, 51%)",
+  "hsl(190, 70%, 50%)",
+];
 
 export default function ReportsPage() {
-  const { bills, incomes, bricks, categories } = useFinanceStore();
+  const { currentCash, bills, incomes, bricks, monthlyTargets, categories, settings, scenarios } = useFinanceStore();
+  const [months, setMonths] = useState(6);
+  const [selectedScenario, setSelectedScenario] = useState<ScenarioType>(settings.default_scenario);
 
-  const billsByCategory = useMemo(() => {
-    const map: Record<string, number> = {};
-    bills.forEach(b => {
-      const cat = categories.find(c => c.id === b.category_id)?.name || 'Sem categoria';
-      map[cat] = (map[cat] || 0) + b.amount;
-    });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [bills, categories]);
+  const report = useMemo(
+    () =>
+      buildReportSnapshot(
+        currentCash,
+        bills,
+        incomes,
+        bricks,
+        categories,
+        settings,
+        scenarios,
+        selectedScenario,
+        months,
+        monthlyTargets,
+      ),
+    [currentCash, bills, incomes, bricks, monthlyTargets, categories, settings, scenarios, selectedScenario, months],
+  );
 
-  const soldBricks = useMemo(() => 
-    bricks.filter(b => b.status === 'sold').map(b => ({
-      name: b.name,
-      ...calcBrickMetrics(b),
-    })).sort((a, b) => b.net_profit - a.net_profit),
-  [bricks]);
-
-  const profitByCategory = useMemo(() => {
-    const map: Record<string, number> = {};
-    bricks.filter(b => b.status === 'sold').forEach(b => {
-      const cat = categories.find(c => c.id === b.category_id)?.name || 'Sem categoria';
-      map[cat] = (map[cat] || 0) + calcBrickMetrics(b).net_profit;
-    });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [bricks, categories]);
-
-  const monthlyIncome = useMemo(() => {
-    const received = incomes.filter(i => i.status === 'received');
-    return received.reduce((s, i) => s + i.amount, 0);
-  }, [incomes]);
-
-  const monthlyExpense = useMemo(() => {
-    return bills.filter(b => b.status === 'paid').reduce((s, b) => s + b.amount, 0);
-  }, [bills]);
-
-  const locked = calcLockedCapital(bricks);
+  const realizedProfit = report.top_profit_bricks.reduce((sum, row) => sum + row.metrics.net_profit, 0);
+  const lockedCapital = report.capital_evolution[report.capital_evolution.length - 1]?.value ?? 0;
+  const freeCashNow = report.free_cash_evolution[report.free_cash_evolution.length - 1]?.value ?? 0;
+  const latestMonth = report.monthly_flow[report.monthly_flow.length - 1];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-sans font-bold">Relatórios</h1>
-        <p className="text-sm text-muted-foreground font-mono">Análise de performance financeira</p>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold">Relatorios</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Fluxo mensal, previsto vs realizado, lucratividade e giro de capital.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Select value={String(months)} onValueChange={(value) => setMonths(Number(value))}>
+            <SelectTrigger className="w-[120px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="3">3 meses</SelectItem>
+              <SelectItem value="6">6 meses</SelectItem>
+              <SelectItem value="12">12 meses</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={selectedScenario} onValueChange={(value) => setSelectedScenario(value as ScenarioType)}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="conservative">Conservador</SelectItem>
+              <SelectItem value="probable">Provavel</SelectItem>
+              <SelectItem value="optimistic">Otimista</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground font-mono">Receita Confirmada</p>
-            <p className="text-xl font-bold font-mono text-positive">{formatCurrency(monthlyIncome)}</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Lucro realizado</p>
+            <p className="mt-2 text-xl font-semibold text-positive">{formatCurrency(realizedProfit, settings.currency)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground font-mono">Despesas Pagas</p>
-            <p className="text-xl font-bold font-mono text-negative">{formatCurrency(monthlyExpense)}</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Capital travado</p>
+            <p className="mt-2 text-xl font-semibold">{formatCurrency(lockedCapital, settings.currency)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground font-mono">Capital Travado</p>
-            <p className="text-xl font-bold font-mono">{formatCurrency(locked)}</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Caixa livre projetado</p>
+            <p className="mt-2 text-xl font-semibold">{formatCurrency(freeCashNow, settings.currency)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground font-mono">Lucro Bricks</p>
-            <p className="text-xl font-bold font-mono text-positive">{formatCurrency(soldBricks.reduce((s, b) => s + b.net_profit, 0))}</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Giro de capital</p>
+            <p className="mt-2 text-xl font-semibold">{report.turnover_ratio.toFixed(2)}x</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Melhor categoria: {report.best_category ?? "Sem dados"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Metas de entrada</p>
+            <p className="mt-2 text-xl font-semibold text-positive">
+              {formatCurrency(latestMonth?.goal_income ?? 0, settings.currency)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Metas mensais previstas para o ultimo mes da leitura.
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Contas liquidas</p>
+            <p className="mt-2 text-xl font-semibold">
+              {formatCurrency(latestMonth?.net_expenses_after_goals ?? 0, settings.currency)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Contas do mes menos metas marcadas para abater gastos.
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        {/* Bills by category */}
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-mono uppercase tracking-wider text-muted-foreground">Contas por Categoria</CardTitle>
+            <CardTitle className="text-sm uppercase tracking-[0.24em] text-muted-foreground">Fluxo mensal</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie data={billsByCategory} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${formatCurrency(value)}`}>
-                  {billsByCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v: number) => formatCurrency(v)} />
-              </PieChart>
+            <ResponsiveContainer width="100%" height={250}>
+              <ComposedChart data={report.monthly_flow}>
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <Tooltip formatter={(value: number) => formatCurrency(value, settings.currency)} />
+                <Bar dataKey="confirmed_income" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="confirmed_expenses" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                <Line type="monotone" dataKey="locked_capital" stroke="hsl(var(--primary))" strokeWidth={2} />
+              </ComposedChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Profit by brick */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-mono uppercase tracking-wider text-muted-foreground">Lucro por Brick Vendido</CardTitle>
+            <CardTitle className="text-sm uppercase tracking-[0.24em] text-muted-foreground">
+              Previsto vs realizado
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {soldBricks.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">Nenhum brick vendido</p>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={report.income_planned_vs_actual}>
+                <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <Tooltip formatter={(value: number) => formatCurrency(value, settings.currency)} />
+                <Bar dataKey="planned" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="actual" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm uppercase tracking-[0.24em] text-muted-foreground">
+              Metas vs contas do mes
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={250}>
+              <ComposedChart data={report.monthly_flow}>
+                <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <Tooltip formatter={(value: number) => formatCurrency(value, settings.currency)} />
+                <Bar dataKey="expected_expenses" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="net_expenses_after_goals" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Line type="monotone" dataKey="goal_income" stroke="hsl(var(--success))" strokeWidth={2} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm uppercase tracking-[0.24em] text-muted-foreground">
+              Lucro por categoria de brick
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {report.profitability_by_category.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Sem vendas suficientes para comparar categorias.</p>
             ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={soldBricks}>
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-                  <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-                  <Tooltip formatter={(v: number) => formatCurrency(v)} contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
-                  <Bar dataKey="net_profit" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} />
-                </BarChart>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={report.profitability_by_category}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={88}
+                    label={({ name, value }) => `${name}: ${formatCurrency(value, settings.currency)}`}
+                  >
+                    {report.profitability_by_category.map((_, index) => (
+                      <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => formatCurrency(value, settings.currency)} />
+                </PieChart>
               </ResponsiveContainer>
             )}
           </CardContent>
         </Card>
 
-        {/* Profit by category */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-mono uppercase tracking-wider text-muted-foreground">Lucro por Categoria de Brick</CardTitle>
+            <CardTitle className="text-sm uppercase tracking-[0.24em] text-muted-foreground">
+              Evolucao do caixa livre
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {profitByCategory.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">Sem dados</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={profitByCategory}>
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-                  <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-                  <Tooltip formatter={(v: number) => formatCurrency(v)} contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
-                  <Bar dataKey="value" fill="hsl(var(--accent))" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={report.free_cash_evolution}>
+                <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                <Tooltip formatter={(value: number) => formatCurrency(value, settings.currency)} />
+                <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
+      </div>
 
-        {/* Brick performance table */}
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-mono uppercase tracking-wider text-muted-foreground">Performance de Bricks Vendidos</CardTitle>
+            <CardTitle className="text-sm uppercase tracking-[0.24em] text-muted-foreground">Itens mais lucrativos</CardTitle>
           </CardHeader>
-          <CardContent>
-            {soldBricks.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">Sem dados</p>
-            ) : (
-              <div className="space-y-2 text-xs">
-                {soldBricks.map((b, i) => (
-                  <div key={i} className="flex justify-between items-center py-1 border-b border-border last:border-0">
-                    <span className="font-medium">{b.name}</span>
-                    <div className="flex gap-4 font-mono">
-                      <span className={b.net_profit >= 0 ? 'text-positive' : 'text-negative'}>{formatCurrency(b.net_profit)}</span>
-                      <span>{b.roi_percent.toFixed(1)}% ROI</span>
-                      <span>{b.days_locked}d</span>
-                      <span>{formatCurrency(b.profit_per_day)}/d</span>
-                    </div>
-                  </div>
-                ))}
+          <CardContent className="space-y-2">
+            {report.top_profit_bricks.length === 0 && <p className="text-sm text-muted-foreground">Nenhum brick vendido ainda.</p>}
+            {report.top_profit_bricks.map((row) => (
+              <div key={row.brick.id} className="flex items-center justify-between rounded-xl bg-muted p-3 text-sm">
+                <div>
+                  <p className="font-medium">{row.brick.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    ROI {row.metrics.roi_percent.toFixed(1)}% · {row.metrics.days_locked} dias · score de liquidez {row.liquidity_score.toFixed(0)}
+                  </p>
+                </div>
+                <span className={row.metrics.net_profit >= 0 ? "font-semibold text-positive" : "font-semibold text-negative"}>
+                  {formatCurrency(row.metrics.net_profit, settings.currency)}
+                </span>
               </div>
-            )}
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm uppercase tracking-[0.24em] text-muted-foreground">Itens mais rapidos de vender</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {report.fastest_bricks.length === 0 && <p className="text-sm text-muted-foreground">Nenhum brick vendido ainda.</p>}
+            {report.fastest_bricks.map((row) => (
+              <div key={row.brick.id} className="flex items-center justify-between rounded-xl bg-muted p-3 text-sm">
+                <div>
+                  <p className="font-medium">{row.brick.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {row.metrics.days_locked} dias · lucro por dia {formatCurrency(row.metrics.profit_per_day, settings.currency)}
+                  </p>
+                </div>
+                <span className="font-semibold">{formatCurrency(row.metrics.net_profit, settings.currency)}</span>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>
