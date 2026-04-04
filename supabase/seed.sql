@@ -1,0 +1,3 @@
+-- Seed intencionalmente vazio.
+-- O CashCompass trabalha apenas com dados reais cadastrados pelo usuario
+-- ou importados pela tela de Importacao.
