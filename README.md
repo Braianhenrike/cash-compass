@@ -289,6 +289,14 @@ npm run dev
 3. entrar no painel
 4. importar a planilha ou cadastrar seus dados reais
 
+## GitHub Copilot cloud agent
+
+Para usar o cloud agent neste repositorio:
+
+1. abra o repositorio no GitHub
+2. inicie uma tarefa do Copilot coding agent
+3. o workflow `.github/workflows/copilot-setup-steps.yml` prepara o ambiente com Node.js 20 e `npm ci`
+
 ## Deploy
 
 ### Frontend no Vercel
